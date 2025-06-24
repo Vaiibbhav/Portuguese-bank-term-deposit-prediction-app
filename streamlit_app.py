@@ -4,10 +4,11 @@ import joblib
 import shap
 import numpy as np
 
-# Load trained model and explainer
+# Load trained model and scaler
 model = joblib.load("xgboost_model.pkl")
+scaler = joblib.load("scaler.pkl")  # ✅ load saved scaler
 
-# Initialize SHAP
+# Initialize SHAP explainer
 explainer = shap.Explainer(model)
 
 # UI Title
@@ -27,7 +28,7 @@ campaign = st.number_input("Number of Contacts During Campaign", min_value=1, ma
 poutcome = st.selectbox("Previous Campaign Outcome", ['failure', 'nonexistent', 'success'])
 previous = st.number_input("Number of Contacts Before This Campaign", min_value=0, max_value=100, value=0)
 
-# Encode categorical features (manually mapping to model encoding)
+# Manual encoding maps
 job_map = {'admin.': 0, 'blue-collar': 1, 'entrepreneur': 2, 'housemaid': 3, 'management': 4,
            'retired': 5, 'self-employed': 6, 'services': 7, 'student': 8, 'technician': 9, 'unemployed': 10}
 marital_map = {'married': 0, 'single': 1, 'divorced': 2}
@@ -38,7 +39,7 @@ month_map = {'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
              'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11}
 poutcome_map = {'failure': 0, 'nonexistent': 1, 'success': 2}
 
-# Create dataframe for prediction
+# Create raw input DataFrame
 input_df = pd.DataFrame({
     'age': [age],
     'job': [job_map[job]],
@@ -51,19 +52,37 @@ input_df = pd.DataFrame({
     'previous': [previous]
 })
 
-# Predict and show result
+# Add missing columns with default values and reorder
+expected_cols = [
+    'age', 'job', 'marital', 'education', 'default', 'housing',
+    'loan', 'contact', 'month', 'day_of_week', 'campaign', 'pdays',
+    'previous', 'poutcome', 'emp.var.rate', 'cons.price.idx',
+    'cons.conf.idx', 'euribor3m', 'nr.employed'
+]
+
+for col in expected_cols:
+    if col not in input_df.columns:
+        input_df[col] = 0  # Default value for missing features
+
+input_df = input_df[expected_cols]  # Reorder to match training
+
+# Apply scaling
+input_scaled = scaler.transform(input_df)
+
+# Predict and display results
 if st.button("Predict"):
-    prediction = model.predict(input_df)
-    proba = model.predict_proba(input_df)[0][1]
+    prediction = model.predict(input_scaled)
+    proba = model.predict_proba(input_scaled)[0][1]
 
     if prediction[0] == 1:
-        st.success(f"✅ The customer is likely to SUBSCRIBE. (Confidence: {round(proba * 100, 2)}%)")
+        st.success(f"The customer is likely to SUBSCRIBE. (Confidence: {round(proba * 100, 2)}%)")
     else:
-        st.warning(f"❌ The customer is NOT likely to subscribe. (Confidence: {round((1 - proba) * 100, 2)}%)")
+        st.warning(f"The customer is NOT likely to subscribe. (Confidence: {round((1 - proba) * 100, 2)}%)")
 
-    # SHAP Explanation
+    # SHAP plot
     st.subheader("SHAP Explanation")
-    shap_values = explainer(input_df)
+    shap_values = explainer(input_scaled)
     st.set_option('deprecation.showPyplotGlobalUse', False)
     shap.plots.waterfall(shap_values[0], max_display=9)
     st.pyplot()
+
